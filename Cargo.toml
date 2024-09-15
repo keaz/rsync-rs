@@ -1,0 +1,12 @@
+[package]
+name = "rsync-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kasun Ranasinghe <kasun.ranasinghe@icloud.com>"]
+description = "A file copy utility using SSH"
+
+[dependencies]
+clap = { version = "4.5.17", features = ["derive"] }
+ssh2 = "0.9.4"
+openssl = { version = "0.10.66" }
+filetime = "0.2.25"
