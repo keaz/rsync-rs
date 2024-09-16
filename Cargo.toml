@@ -10,3 +10,5 @@ clap = { version = "4.5.17", features = ["derive"] }
 ssh2 = "0.9.4"
 openssl = { version = "0.10.66" }
 filetime = "0.2.25"
+indicatif = { version = "0.17.6", features = ["improved_unicode"] }
+console = { version = "0.15.7", features = ["ansi-parsing"] }

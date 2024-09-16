@@ -90,6 +90,7 @@ pub fn read_file_metadata(
     source: &str,
     file_data: &mut Vec<SourceFile>,
     folders: &mut Vec<String>,
+    destination: &str,
 ) {
     if file_reader.is_folder() {
         let path = PathBuf::from(source);
@@ -100,7 +101,7 @@ pub fn read_file_metadata(
                 return;
             }
             Ok(entries) => {
-                walk_dir(entries, file_data, folders);
+                walk_dir(entries, file_data, folders, source, destination);
             }
         }
     } else {
@@ -119,7 +120,13 @@ pub fn read_file_metadata(
     }
 }
 
-fn walk_dir(mut entries: fs::ReadDir, file_data: &mut Vec<SourceFile>, folders: &mut Vec<String>) {
+fn walk_dir(
+    mut entries: fs::ReadDir,
+    file_data: &mut Vec<SourceFile>,
+    folders: &mut Vec<String>,
+    source: &str,
+    destination: &str,
+) {
     while let Some(Ok(dir_entry)) = entries.next() {
         let path = dir_entry.path();
         if path.is_dir() {
@@ -129,8 +136,10 @@ fn walk_dir(mut entries: fs::ReadDir, file_data: &mut Vec<SourceFile>, folders: 
                     eprintln!("Error reading folder  path {}", er);
                 }
                 Ok(entries) => {
-                    folders.push(path.to_str().unwrap().to_string());
-                    walk_dir(entries, file_data, folders)
+                    let remote_file =
+                        format!("{}/{}", destination, get_reative_path(&path, source));
+                    folders.push(remote_file);
+                    walk_dir(entries, file_data, folders, source, destination);
                 }
             }
         } else if path.is_file() {
@@ -158,4 +167,11 @@ fn extract_detail_and_walk(metadata: Metadata, path: PathBuf, file_data: &mut Ve
             modified,
         });
     }
+}
+
+pub fn get_reative_path(file: &PathBuf, source: &str) -> String {
+    let source = PathBuf::from(source);
+    let relative_path = file.strip_prefix(source).unwrap();
+    let relative_path = format!("{:?}", relative_path);
+    relative_path.replace('\"', "")
 }
