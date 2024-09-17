@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     fs::File,
     io::{Read, Write},
@@ -40,6 +41,12 @@ fn copy_files_over_ssh(
     let user = parts[0];
     let host = parts[1];
 
+    println!(
+        "{} {} Connectig to server {} ...",
+        style("[1/5]").bold().dim(),
+        TRUCK,
+        host
+    );
     // Open TCP connection to SSH server
     let tcp = TcpStream::connect(format!("{}:22", host))?;
     let mut sess = Session::new().unwrap();
@@ -82,7 +89,7 @@ fn scp_upload(
 
         println!(
             "{} {} Collecting files...",
-            style("[1/4]").bold().dim(),
+            style("[2/5]").bold().dim(),
             TRUCK
         );
 
@@ -95,24 +102,27 @@ fn scp_upload(
         );
 
         println!(
-            "{} {} Check Folder exists...",
-            style("[2/4]").bold().dim(),
-            TRUCK
+            "{} {} Check {} Folder exists...",
+            style("[3/5]").bold().dim(),
+            TRUCK,
+            folders.len()
         );
         let folders_to_create = check_folders_exists(sess, &folders, destination)?;
-
+        let is_root_does_not_exists = folders_to_create.len() == folders.len() + 1;
+        let leaf_folders = get_leaf_folders(folders_to_create.iter().map(|f| f.as_str()).collect());
         println!(
-            "{} {} Creating Folders...",
-            style("[3/4]").bold().dim(),
-            TRUCK
+            "{} {} Creating {} Folders...",
+            style("[4/5]").bold().dim(),
+            TRUCK,
+            leaf_folders.len()
         );
-        create_folders(sess, &folders_to_create, destination)?;
+        create_folders(sess, &leaf_folders)?;
 
         let total_size: u64 = file_data.iter().map(|file_data| file_data.size).sum();
         let total_size_pb = create_total_progressbar(&multi_progress, total_size);
         let current_file = create_progress_bars(&multi_progress);
 
-        println!("{} {} Copying...", style("[4/4]").bold().dim(), TRUCK);
+        println!("{} {} Copying...", style("[5/5]").bold().dim(), TRUCK);
         for file in file_data {
             let remote_file = format!(
                 "{}/{}",
@@ -120,13 +130,19 @@ fn scp_upload(
                 get_reative_path(&file.file_path, source)
             );
             let size = file.size;
-            let remote_size = get_remote_file_size(sess, &remote_file).unwrap_or(0);
             current_file.set_message(format!("Copying file: {:?}", remote_file));
-            if remote_size != size {
+            // Ignore file size check if the root folder desn't exists, that means we should copy all files
+            if is_root_does_not_exists {
                 scp_upload_file(sess, file, &remote_file)?;
                 total_size_pb.inc(size);
             } else {
-                total_size_pb.inc(size);
+                let remote_size = get_remote_file_size(sess, &remote_file).unwrap_or(0);
+                if remote_size != size {
+                    scp_upload_file(sess, file, &remote_file)?;
+                    total_size_pb.inc(size);
+                } else {
+                    total_size_pb.inc(size);
+                }
             }
         }
         total_size_pb.finish();
@@ -160,7 +176,7 @@ fn check_folders_exists(
 
     for folder in folders {
         let mut channel = sess.channel_session()?;
-        let cmd = format!("stat {}/{}", destination, folder);
+        let cmd = format!("stat {}", folder);
         channel.exec(&cmd)?;
 
         let mut result = String::new();
@@ -175,11 +191,7 @@ fn check_folders_exists(
     Ok(folders_to_create)
 }
 
-fn create_folders(
-    sess: &Session,
-    folders: &Vec<String>,
-    destination: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn create_folders(sess: &Session, folders: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     for folder in folders {
         let mut channel = sess.channel_session()?;
         let cmd = format!("mkdir -p {}", folder);
@@ -227,18 +239,6 @@ fn scp_upload_file(
             remote_file.write_all(&buffer[..n])?;
         }
     }
-    // let mut buffer = vec![0; file_size as usize]; // 1MB buffer
-
-    // // Transfer file in chunks
-    // let mut file = File::open(source.file_path)?;
-
-    // loop {
-    //     let n = file.read(&mut buffer)?;
-    //     if n == 0 {
-    //         break;
-    //     }
-    //     remote_file.write_all(&buffer[..n])?;
-    // }
 
     Ok(())
 }
@@ -280,4 +280,26 @@ pub fn create_total_progressbar(multi_progress: &MultiProgress, total_files: u64
 pub fn create_progress_bars(multi_progress: &MultiProgress) -> ProgressBar {
     let current_file = multi_progress.add(ProgressBar::new_spinner());
     current_file
+}
+
+fn get_leaf_folders(folders_to_create: Vec<&str>) -> Vec<String> {
+    let mut sorted_folders = folders_to_create.clone();
+    sorted_folders.sort();
+
+    let mut leaf_folders = Vec::new();
+
+    for i in 0..sorted_folders.len() {
+        let mut is_leaf = true;
+        for j in (i + 1)..sorted_folders.len() {
+            if sorted_folders[j].starts_with(sorted_folders[i]) {
+                is_leaf = false;
+                break;
+            }
+        }
+        if is_leaf {
+            leaf_folders.push(sorted_folders[i].to_string());
+        }
+    }
+
+    leaf_folders
 }
