@@ -1,11 +1,10 @@
 use std::{
-    collections::HashSet,
     env,
     fs::File,
     io::{Read, Write},
     net::TcpStream,
-    path::{Path, PathBuf},
-    sync::Arc,
+    path::Path,
+    sync::{Arc, Mutex},
 };
 
 use clap::Parser;
@@ -13,12 +12,21 @@ use cmd::CmdArgs;
 use console::{style, Emoji};
 use indicatif::{MultiProgress, ProgressBar, ProgressState, ProgressStyle};
 use io::{get_reative_path, read_file_metadata, FileReader, SourceFile};
-use ssh2::{MethodType, Session};
+use ssh::create_session;
+use ssh2::Session;
+
+use self::{ssh::check_folders_exists, util::get_leaf_folders};
 
 mod cmd;
 mod io;
+mod ssh;
+mod util;
 
 static TRUCK: Emoji<'_, '_> = Emoji("🚚  ", "");
+static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
+static CONNECTING: Emoji<'_, '_> = Emoji("🔗  ", "");
+static UPLOADING: Emoji<'_, '_> = Emoji("📤  ", "");
+static FOLDER: Emoji<'_, '_> = Emoji("📁  ", "");
 
 fn main() {
     let cmds = CmdArgs::parse_from(env::args_os());
@@ -33,34 +41,7 @@ fn copy_files_over_ssh(
     destination: &str,
     ssh_conn: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Split SSH connection string into user and host
-    let parts: Vec<&str> = ssh_conn.split('@').collect();
-    if parts.len() != 2 {
-        return Err("Invalid SSH connection format. Expected user@host.".into());
-    }
-    let user = parts[0];
-    let host = parts[1];
-
-    println!(
-        "{} {} Connectig to server {} ...",
-        style("[1/5]").bold().dim(),
-        TRUCK,
-        host
-    );
-    // Open TCP connection to SSH server
-    let tcp = TcpStream::connect(format!("{}:22", host))?;
-    let mut sess = Session::new().unwrap();
-
-    sess.set_tcp_stream(tcp);
-    sess.handshake().unwrap();
-
-    sess.userauth_agent(user)?;
-
-    // Check if authentication succeeded
-    if !sess.authenticated() {
-        return Err("SSH authentication failed.".into());
-    }
-
+    let sess = create_session(source, destination, ssh_conn)?;
     // Start SCP session
     scp_upload(&sess, source, destination)?;
 
@@ -76,8 +57,6 @@ fn scp_upload(
         .unwrap()
         .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
 
-    let progress_bar = Arc::new(ProgressBar::new_spinner());
-    progress_bar.finish_and_clear();
     let multi_progress = MultiProgress::new();
 
     let path = Path::new(source);
@@ -90,7 +69,7 @@ fn scp_upload(
         println!(
             "{} {} Collecting files...",
             style("[2/5]").bold().dim(),
-            TRUCK
+            LOOKING_GLASS,
         );
 
         read_file_metadata(
@@ -113,7 +92,7 @@ fn scp_upload(
         println!(
             "{} {} Creating {} Folders...",
             style("[4/5]").bold().dim(),
-            TRUCK,
+            FOLDER,
             leaf_folders.len()
         );
         create_folders(sess, &leaf_folders)?;
@@ -121,8 +100,10 @@ fn scp_upload(
         let total_size: u64 = file_data.iter().map(|file_data| file_data.size).sum();
         let total_size_pb = create_total_progressbar(&multi_progress, total_size);
         let current_file = create_progress_bars(&multi_progress);
+        current_file.set_style(spinner_style);
 
-        println!("{} {} Copying...", style("[5/5]").bold().dim(), TRUCK);
+        println!("{} {} Copying...", style("[5/5]").bold().dim(), UPLOADING);
+
         for file in file_data {
             let remote_file = format!(
                 "{}/{}",
@@ -151,44 +132,6 @@ fn scp_upload(
     }
 
     Ok(())
-}
-
-fn check_folders_exists(
-    sess: &Session,
-    folders: &Vec<String>,
-    destination: &str,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let mut folders_to_create = vec![];
-
-    let mut channel = sess.channel_session()?;
-    let cmd = format!("stat {}", destination);
-    channel.exec(&cmd)?;
-
-    let mut result = String::new();
-    channel.read_to_string(&mut result)?;
-    channel.wait_close()?;
-
-    if result.is_empty() {
-        folders_to_create.push(destination.to_string());
-        folders_to_create.append(&mut folders.clone());
-        return Ok(folders_to_create);
-    }
-
-    for folder in folders {
-        let mut channel = sess.channel_session()?;
-        let cmd = format!("stat {}", folder);
-        channel.exec(&cmd)?;
-
-        let mut result = String::new();
-        channel.read_to_string(&mut result)?;
-        channel.wait_close()?;
-
-        if result.is_empty() {
-            folders_to_create.push(folder.clone());
-        }
-    }
-
-    Ok(folders_to_create)
 }
 
 fn create_folders(sess: &Session, folders: &Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
@@ -278,28 +221,5 @@ pub fn create_total_progressbar(multi_progress: &MultiProgress, total_files: u64
 }
 
 pub fn create_progress_bars(multi_progress: &MultiProgress) -> ProgressBar {
-    let current_file = multi_progress.add(ProgressBar::new_spinner());
-    current_file
-}
-
-fn get_leaf_folders(folders_to_create: Vec<&str>) -> Vec<String> {
-    let mut sorted_folders = folders_to_create.clone();
-    sorted_folders.sort();
-
-    let mut leaf_folders = Vec::new();
-
-    for i in 0..sorted_folders.len() {
-        let mut is_leaf = true;
-        for j in (i + 1)..sorted_folders.len() {
-            if sorted_folders[j].starts_with(sorted_folders[i]) {
-                is_leaf = false;
-                break;
-            }
-        }
-        if is_leaf {
-            leaf_folders.push(sorted_folders[i].to_string());
-        }
-    }
-
-    leaf_folders
+    multi_progress.add(ProgressBar::new_spinner())
 }

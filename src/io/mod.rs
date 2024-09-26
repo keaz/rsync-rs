@@ -1,18 +1,8 @@
 use std::{
     fs::{self, File, Metadata},
-    io::{Read, Seek, SeekFrom, Write},
-    ops::ControlFlow,
-    path::PathBuf,
-    sync::{Arc, Mutex},
+    path::{Path, PathBuf},
     time::SystemTime,
 };
-
-use filetime::{set_file_mtime, FileTime};
-
-#[derive(Debug)]
-struct Folder {
-    path_buff: PathBuf,
-}
 
 #[derive(Clone)]
 pub struct SourceFile {
@@ -29,7 +19,6 @@ pub enum FileError {
 
 pub struct FileReader {
     file: File,
-    file_name: String,
 }
 
 impl FileReader {
@@ -38,50 +27,15 @@ impl FileReader {
         if !path_buf.exists() {
             println!("File does not exists {:?}", path);
         }
-        let cl = path_buf.clone();
-        let file_name = cl.file_name().unwrap().to_str().unwrap();
         FileReader {
             file: File::open(path_buf).unwrap(),
-            file_name: String::from(file_name),
-        }
-    }
-
-    pub fn from(path_buf: PathBuf) -> Self {
-        if !path_buf.exists() {
-            println!("File does not exists {:?}", path_buf);
-        }
-        let cl = path_buf.clone();
-        let file_name = cl.file_name().unwrap().to_str().unwrap();
-        let file = File::open(path_buf);
-        if let Err(er) = file {
-            eprintln!("Error opening file {}", er);
-            panic!()
-        }
-        FileReader {
-            file: file.unwrap(),
-            file_name: String::from(file_name),
         }
     }
 }
 
 impl FileReader {
-    pub fn name(&self) -> String {
-        self.file_name.clone()
-    }
-
-    pub fn size(&self) -> u64 {
-        self.file.metadata().unwrap().len()
-    }
-
     pub fn is_folder(&self) -> bool {
         self.file.metadata().unwrap().is_dir()
-    }
-
-    pub fn read_random(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize, FileError> {
-        self.file.seek(SeekFrom::Start(offset)).unwrap();
-        let read_data = self.file.read(buf).unwrap();
-
-        Ok(read_data)
     }
 }
 
@@ -98,7 +52,6 @@ pub fn read_file_metadata(
         match reads {
             Err(er) => {
                 eprintln!("Error reading folder  path {}", er);
-                return;
             }
             Ok(entries) => {
                 walk_dir(entries, file_data, folders, source, destination);
@@ -169,7 +122,7 @@ fn extract_detail_and_walk(metadata: Metadata, path: PathBuf, file_data: &mut Ve
     }
 }
 
-pub fn get_reative_path(file: &PathBuf, source: &str) -> String {
+pub fn get_reative_path(file: &Path, source: &str) -> String {
     let source = PathBuf::from(source);
     let relative_path = file.strip_prefix(source).unwrap();
     let relative_path = format!("{:?}", relative_path);
