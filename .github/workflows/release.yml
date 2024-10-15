@@ -37,22 +37,17 @@ jobs:
 
       # Step 3: Install necessary tools for macOS universal binary
       - name: Install macOS universal binary tools
-        if: matrix.target == 'universal'
         run: |
           rustup target add x86_64-apple-darwin aarch64-apple-darwin
 
       # Step 4: Build with Cargo (macOS universal requires both targets)
       - name: Build with Cargo
         run: |
-          if [[ "${{ matrix.target }}" == "universal" ]]; then
-            cargo build --release --target x86_64-apple-darwin
-            cargo build --release --target aarch64-apple-darwin
-            lipo -create -output ./target/release/universal_binary \
-                 ./target/x86_64-apple-darwin/release/your_binary_name \
-                 ./target/aarch64-apple-darwin/release/your_binary_name
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          lipo -create -output ./target/release/universal_binary \
+                ./target/x86_64-apple-darwin/release/kcli \
+                ./target/aarch64-apple-darwin/release/kcli
         shell: bash
 
       # Step 5: Determine if the release is a pre-release
@@ -84,7 +79,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: |
-            ${{ matrix.os == 'macos-latest' && './target/release/universal_binary' || './target/release/your_binary_name' }}
+            ${{ matrix.os == 'macos-latest' && './target/release/universal_binary' || './target/release/kcli' }}
           asset_name: |
-            ${{ matrix.os == 'macos-latest' && 'your_binary_name-macos-universal' || matrix.os == 'ubuntu-latest' && 'your_binary_name-linux' || 'your_binary_name-windows' }}
+            ${{ matrix.os == 'macos-latest' && 'kcli-macos-universal' || matrix.os == 'ubuntu-latest' && 'kcli-linux' || 'kcli-windows' }}
           asset_content_type: application/octet-stream
