@@ -52,6 +52,7 @@ jobs:
                  ./target/aarch64-apple-darwin/release/your_binary_name
           else
             cargo build --release --target ${{ matrix.target }}
+          fi
         shell: bash
 
       # Step 5: Determine if the release is a pre-release
