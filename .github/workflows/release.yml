@@ -17,7 +17,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         include:
           - os: macos-latest
-            target: universal  # For macOS Universal binary (x86_64 and ARM64)
+            target_x86: x86_64-apple-darwin
+            target_arm: aarch64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
           - os: windows-latest
@@ -33,7 +34,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }}
+          target: ${{ matrix.target || matrix.target_x86 }}
 
       # Step 3: Install necessary tools for macOS universal binary
       - name: Install macOS universal binary tools
