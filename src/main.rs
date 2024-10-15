@@ -98,35 +98,83 @@ fn scp_upload(
         create_folders(sess, &leaf_folders)?;
 
         let total_size: u64 = file_data.iter().map(|file_data| file_data.size).sum();
-        let total_size_pb = create_total_progressbar(&multi_progress, total_size);
+        let total_size_pb = Arc::new(create_total_progressbar(&multi_progress, total_size));
         let current_file = create_progress_bars(&multi_progress);
         current_file.set_style(spinner_style);
+        let current_file = Arc::new(current_file);
 
         println!("{} {} Copying...", style("[5/5]").bold().dim(), UPLOADING);
 
-        for file in file_data {
-            let remote_file = format!(
-                "{}/{}",
-                destination,
-                get_reative_path(&file.file_path, source)
-            );
-            let size = file.size;
-            current_file.set_message(format!("Copying file: {:?}", remote_file));
-            // Ignore file size check if the root folder desn't exists, that means we should copy all files
-            if is_root_does_not_exists {
-                scp_upload_file(sess, file, &remote_file)?;
-                total_size_pb.inc(size);
-            } else {
-                let remote_size = get_remote_file_size(sess, &remote_file).unwrap_or(0);
-                if remote_size != size {
-                    scp_upload_file(sess, file, &remote_file)?;
-                    total_size_pb.inc(size);
-                } else {
-                    total_size_pb.inc(size);
+        let mut handlers = vec![];
+        let file_data = Arc::new(Mutex::new(file_data));
+        for _ in 0..3 {
+            let file_data = file_data.clone();
+            let sess = sess.clone();
+            let current_file = current_file.clone();
+            let total_size_pb = total_size_pb.clone();
+            let destination = destination.to_string();
+            let source = source.to_string();
+
+            let handle = std::thread::spawn(move || {
+                loop {
+                    let mut file_data = file_data.lock().unwrap();
+                    let file = match file_data.pop() {
+                        Some(file) => file,
+                        None => break,
+                    };
+                    drop(file_data);
+                    let remote_file = format!(
+                        "{}/{}",
+                        destination,
+                        get_reative_path(&file.file_path, &source)
+                    );
+                    let size = file.size;
+                    current_file.set_message(format!("Copying file: {:?}", remote_file));
+                    // Ignore file size check if the root folder desn't exists, that means we should copy all files
+                    if is_root_does_not_exists {
+                        scp_upload_file(&sess, file, &remote_file).unwrap();
+                        total_size_pb.inc(size);
+                    } else {
+                        let remote_size = get_remote_file_size(&sess, &remote_file).unwrap_or(0);
+                        if remote_size != size {
+                            scp_upload_file(&sess, file, &remote_file).unwrap();
+                            total_size_pb.inc(size);
+                        } else {
+                            total_size_pb.inc(size);
+                        }
+                    }
                 }
-            }
+            });
+            handlers.push(handle);
         }
-        total_size_pb.finish();
+
+        for handler in handlers {
+            handler.join().unwrap();
+        }
+
+        // for file in file_data {
+        //     let remote_file = format!(
+        //         "{}/{}",
+        //         destination,
+        //         get_reative_path(&file.file_path, source)
+        //     );
+        //     let size = file.size;
+        //     current_file.set_message(format!("Copying file: {:?}", remote_file));
+        //     // Ignore file size check if the root folder desn't exists, that means we should copy all files
+        //     if is_root_does_not_exists {
+        //         scp_upload_file(sess, file, &remote_file)?;
+        //         total_size_pb.inc(size);
+        //     } else {
+        //         let remote_size = get_remote_file_size(sess, &remote_file).unwrap_or(0);
+        //         if remote_size != size {
+        //             scp_upload_file(sess, file, &remote_file)?;
+        //             total_size_pb.inc(size);
+        //         } else {
+        //             total_size_pb.inc(size);
+        //         }
+        //     }
+        // }
+        // total_size_pb.finish();
     } else {
         //scp_upload_file(sess, path, destination)?;
     }
